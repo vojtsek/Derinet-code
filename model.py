@@ -13,6 +13,26 @@ NUMBER_FEATURES = 107
 HIDDEN = 200
 LABELS = 2
 
+def evaluate(gold, hyp):
+    tp = fp = tn = fn = 0
+    for g, h in zip(gold, hyp):
+        if g:
+            if h == 1:
+                tp += 1
+            else:
+                fn += 1
+        else:
+            if h == 0:
+                tn += 1
+            else:
+                fp += 1
+
+    precision = tp / (tp + fp)
+    recall = tp / (tp + fn)
+    fscore = 2 * precision * recall / (precision + recall)
+    return precision, recall, fscore
+
+
 class Network:
     def __init__(self, logdir, experiment, threads, layer_size):
         # Construct the graph
@@ -20,9 +40,11 @@ class Network:
             self.input = tf.placeholder(tf.float32, [None, NUMBER_FEATURES], name="images")
             self.labels = tf.placeholder(tf.int64, [None], name="labels")
 
-        hidden_layer = layers.fully_connected(self.input, num_outputs=layer_size, activation_fn=tf.nn.sigmoid,
-                                              scope="hidden_layer")
-        output_layer = layers.fully_connected(hidden_layer, num_outputs=LABELS, activation_fn=None,
+        hidden_layer1 = layers.fully_connected(self.input, num_outputs=layer_size, activation_fn=tf.nn.sigmoid,
+                                              scope="hidden_layer1")
+        #hidden_layer2 = layers.fully_connected(hidden_layer1, num_outputs=int(layer_size * 0.5), activation_fn=tf.nn.sigmoid,
+         #                                     scope="hidden_layer2")
+        output_layer = layers.fully_connected(hidden_layer1, num_outputs=LABELS, activation_fn=None,
                                               scope="output_layer")
 
         with tf.name_scope("loss"):
@@ -40,7 +62,7 @@ class Network:
 
         # Summaries
         self.summaries = {'training': tf.summary.merge_all() }
-        for dataset in ["dev", "test"]:
+        for dataset in ["valid", "test", "train"]:
             self.summaries[dataset] = tf.summary.scalar(dataset + "/accuracy", accuracy)
 
         # Create the session
@@ -57,17 +79,18 @@ class Network:
         _, summary = self.session.run([self.training, self.summaries['training']], {self.input: features, self.labels: labels})
         self.summary_writer.add_summary(summary, self.steps)
 
-    def evaluate(self, dataset, features, labels):
+    def evaluate(self, epoch, dataset, features, labels):
         summary = self.summaries[dataset].eval({self.input: features, self.labels: labels}, self.session)
         self.summary_writer.add_summary(summary, self.steps)
         _, acc = self.session.run([self.training, self.accuracy], {self.input: features, self.labels: labels})
-        print(acc)
+        with open("one_layer_epoch_{}.acc".format(epoch), 'w') as f:
+            f.write(str(acc))
 
     def predict(self, epoch, features, labels):
         _, pred = self.session.run([self.training, self.predictions], {self.input: features, self.labels: labels})
-        with open("epoch_{}.pred".format(epoch), 'w') as f:
-            for p in pred:
-                f.write(str(p))
+        precision, recall, fscore = evaluate(labels, pred)
+        with open("one_layer_epoch_{}.scores".format(epoch), 'w') as f:
+            f.write("{},{},{}".format(precision, recall, fscore))
     
 
 
@@ -97,16 +120,25 @@ if __name__ == '__main__':
     test_data = dataset.get_test()
     train_data = dataset.get_train()
     valid_data = dataset.get_valid()
-#    with open("test.reference", 'wb') as f:
-#            pickle.dump(test_data[1], f)
-    # Train
+#    with open("test.reference", 'w') as f:
+#        for p in test_data[1]:
+#            f.write(str(p))
+#    with open("train.reference", 'w') as f:
+#        for p in train_data[1]:
+#            f.write(str(p))
+#    with open("valid.reference", 'w') as f:
+#        for p in valid_data[1]:
+#           f.write(str(p))
+#    # Train
     for i in range(args.epochs):
         while dataset.has_next():
             features, labels = dataset.next_batch()
             network.train(features, labels)
         dataset.reset()
         # network.evaluate("dev", mnist.validation.images, mnist.validation.labels)
-        network.evaluate("test", test_data[0], test_data[1])
+        network.evaluate(args.exp + str(i) + "_test", "test", test_data[0], test_data[1])
+        network.evaluate(args.exp + str(i) + "_valid", "valid", valid_data[0], valid_data[1])
+        network.evaluate(args.exp + str(i) + "_test", "train", train_data[0], train_data[1])
         network.predict(args.exp + str(i) + "_test", test_data[0], test_data[1])
         network.predict(args.exp + str(i) + "_train", train_data[0], train_data[1])
         network.predict(args.exp + str(i) + "_valid", valid_data[0], valid_data[1])
