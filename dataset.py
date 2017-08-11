@@ -1,7 +1,8 @@
+import csv
 import numpy as np
 import editdistance
-# import matplotlib.pyplot as plt
-
+import pickle
+import io
 # make pairs from windows of size 10
 # -> l1,l2,deriv?
 
@@ -41,8 +42,7 @@ class Dataset:
         self.chars2ints = {}
         self.sentence_lens = []
         # read and analyze the data
-        import csv
-        with open(fn, 'r') as dest_f:
+        with io.open(fn, "r", encoding="utf-8") as dest_f:
             data_iter = csv.reader(dest_f,
                                    delimiter='\t',
                                    quotechar='"')
