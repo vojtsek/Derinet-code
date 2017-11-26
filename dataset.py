@@ -6,6 +6,23 @@ import io
 # make pairs from windows of size 10
 # -> l1,l2,deriv?
 
+import unicodedata
+
+def remove_accents(input_str):
+    nfkd_form = unicodedata.normalize('NFKD', input_str)
+    only_ascii = nfkd_form.encode('ASCII', 'ignore')
+    return only_ascii
+
+
+
+def get_all_bigrams(word):
+    bigrams = set()
+    for w1,w2 in zip(word, word[1:]):
+        bigr = w1+w2
+        unaccented = remove_accents(bigr)
+        bigrams.add(unaccented)
+    return bigrams
+
 def create_features(dato):
     pass
 
@@ -41,6 +58,7 @@ class Dataset:
         self.dst_from_parents = []
         self.chars2ints = {}
         self.sentence_lens = []
+        self.bigrams = set()
         # read and analyze the data
         with io.open(fn, "r", encoding="utf-8") as dest_f:
             data_iter = csv.reader(dest_f,
@@ -58,6 +76,8 @@ class Dataset:
                     continue
                 first = line
                 second = data[idx, :]
+                # for bigr in get_all_bigrams(first[1]):
+                #     self.bigrams.add(bigr)
                 edge = line[0] == data[idx, -1]
                 if edge:
                     self.dst_from_parents.append(np.abs(int(line[0]) - int(data[idx, 0])))
@@ -74,7 +94,9 @@ class Dataset:
         # construct feature vector
         X = []
         y = []
-        max_sentence_length = 0
+        children = []
+        parents = []
+        max_token_length = 0
         for datapoint in pairs:
             first, second, edge = datapoint
             if not as_chars:
@@ -93,69 +115,82 @@ class Dataset:
                 fv[SUFFIX_COUNT + 6] = ord(second[3])
                 X.append(fv)
             else:
-                sentence_length = len(first[1]) + len(second[1]) + 1
-                max_sentence_length = max(max_sentence_length, sentence_length)
-                self.sentence_lens.append(sentence_length)
-                X.append(self.embed(first[1], second[1]))
-            y.append(edge)
+                token_length = max(len(first[1]), len(second[1])) + 1
+                max_token_length = max(max_token_length, token_length)
+                self.sentence_lens.append(token_length)
+                child, parent = self.embed(first[1], second[1], edge)
+                children.append(child)
+                parents.append(parent)
+            y.append(int(edge))
         if not as_chars:
             X_tmp = np.array(X)
         else:
-            X_tmp = np.zeros((len(X), max_sentence_length))
-            for i, rec in enumerate(X):
-                X_tmp[i,:len(rec)] = rec
+            parents_tmp = np.zeros((len(X), max_token_length))
+            children_tmp = np.zeros((len(X), max_token_length))
+
+            for i, rec in enumerate(parents):
+                parents_tmp[i,:len(rec)] = rec
+            for i, rec in enumerate(children):
+                children_tmp[i,:len(rec)] = rec
+
+            parents_tmp = self.transform2nhot(parents_tmp)
+            children_tmp = self.transform2nhot(children_tmp)
+
+
         y = np.array(y)
         X = X_tmp
         self.dataset = (X, y)
         # with open('dataset-subset.dump', 'wb') as f:
         #     pickle.dump(dataset, f)
         test_size = int(len(X) * test_size)
-        self.train_X, self.train_y = X[test_size:], y[test_size:]
-        self.perm = np.random.permutation(len(self.train_X))
-        self.test_X, self.test_y = X[:test_size], y[:test_size]
         self.sentence_lens = np.array(self.sentence_lens)
+        self.train_X, self.train_y, self.lens_train = X[test_size:], y[test_size:], self.sentence_lens[test_size:]
+        self.perm = np.random.permutation(len(self.train_X))
+        self.test_X, self.test_y, self.lens_test = X[:test_size], y[:test_size], self.sentence_lens[:test_size]
         self.current_idx = 0
 
-    def embed(self, v1, v2):
-        result = []
+    def embed(self, v1, v2, is_edge):
+        result1 = []
+        result2 = []
         for v in v1:
             if v not in self.chars2ints:
                 # 0, 1 reserved for separator and UNK
                 self.chars2ints[v] = len(self.chars2ints) + 2
-            result.append(self.chars2ints[v])
-        result.append(0)
-        for v in v2:
-            if v not in self.chars2ints:
-                # 0, 1 reserved for separator and UNK
-                self.chars2ints[v] = len(self.chars2ints) + 2
-            result.append(self.chars2ints[v])
-        return result
+            result1.append(self.chars2ints[v])
+        result1.append(0)
+        if is_edge:
+            for v in v2:
+                if v not in self.chars2ints:
+                    # 0, 1 reserved for separator and UNK
+                    self.chars2ints[v] = len(self.chars2ints) + 2
+                result2.append(self.chars2ints[v])
+        result2.append(0)
+        return result1, result2
+
+    def transform2nhot(self, data):
+        return data
 
     def has_next(self):
-        return self.current_idx < len(self.train_X)
+        if self.current_idx + 10 >= len(self.train_X):
+            return False
+        return True
 
     def get_test(self):
-        return self.test_X, self.test_y
+        return self.test_X, self.test_y, self.lens_test
 
     def get_train(self):
-        return self.train_X, self.train_y
+        return self.train_X, self.train_y, self.lens_train
 
     def next_batch(self, bs=10):
-        batch = self.train_X[self.perm[self.current_idx:(self.current_idx + bs)]], self.train_y[self.perm[self.current_idx:(self.current_idx + bs)]]
+        batch = self.train_X[self.perm[self.current_idx:(self.current_idx + bs)], :],\
+                self.train_y[self.perm[self.current_idx:(self.current_idx + bs)]],\
+                self.lens_train[self.perm[self.current_idx:(self.current_idx + bs)]]
         self.current_idx += bs
-        return batch, self.sentence_lens[self.perm[self.current_idx:(self.current_idx + bs)]]
+        return batch
 
     def reset(self):
         self.current_idx = 0
         self.perm = np.random.permutation(len(self.train_X))
-
-    def observe(self):
-        print(self.dataset[0].shape)
-        print(len(self.dst_from_parents))
-        plt.hist(self.dst_from_parents)
-        plt.xlabel('distance from parent')
-        plt.ylabel('count')
-        plt.show()
 
 if __name__ == '__main__':
     d = Dataset('data/derismall.tsv', as_chars=True)
