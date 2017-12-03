@@ -69,7 +69,7 @@ class Dataset:
         data = np.asarray(data)
         pairs = []
         for n, line in enumerate(data):
-            for i in range(-5, 6):
+            for i in range(-10, 11):
                 if i == 0:
                     continue
                 idx = n + i
@@ -95,7 +95,7 @@ class Dataset:
         # construct feature vector
         X = []
         y = []
-        children = []
+        examples = []
         parents = []
         max_token_length = 0
         self.chars2ints['UNK'] = 0
@@ -120,40 +120,40 @@ class Dataset:
                 fv[SUFFIX_COUNT + 6] = ord(second[3])
                 X.append(fv)
             else:
-                token_length = max(len(first[1]), len(second[1])) + 2
+                token_length = len(first[1]) + len(second[1]) + 2
                 max_token_length = max(max_token_length, token_length)
                 self.sentence_lens.append(token_length)
-                if edge:
-                    child, parent = self.embed(first[1], second[1], edge)
-                    children.append(child)
-                    parents.append(parent)
+                # if edge:
+                example = self.embed(first[1], second[1], edge)
+                examples.append(example)
+                    # parents.append(parent)
             y.append(int(edge))
         if not as_chars:
             X_tmp = np.array(X)
         else:
             self.max_token_length = max_token_length
             parents_tmp = np.zeros((len(parents), max_token_length))
-            children_tmp = np.zeros((len(children), max_token_length))
+            examples_tmp = np.zeros((len(examples), max_token_length))
 
             # shape (no_examples, max_token_length)
             for i, rec in enumerate(parents):
                 parents_tmp[i,:len(rec)] = rec
-            for i, rec in enumerate(children):
-                children_tmp[i,:len(rec)] = rec
+            for i, rec in enumerate(examples):
+                examples_tmp[i,:len(rec)] = rec
 
             # self.parents = self.transform2onehot(parents_tmp, len(self.chars2ints))
             # self.children = self.transform2onehot(children_tmp, len(self.chars2ints))
             self.parents = parents_tmp
-            self.children = children_tmp
+            self.examples = examples_tmp
 
 
-        y = np.array(y)
-        # X = X_tmp
+        self.y = np.array(y)
+        X = X_tmp
         self.dataset = (X, y)
         # with open('dataset-subset.dump', 'wb') as f:
         #     pickle.dump(dataset, f)
         if self.as_chars:
-            test_size = int(len(self.parents) * test_size)
+            test_size = int(len(self.examples) * test_size)
         else:
             test_size = int(len(X) * test_size)
 
@@ -161,8 +161,8 @@ class Dataset:
         self.number_tokens = len(self.chars2ints)
         self.int2chars = { y:x for x, y in self.chars2ints.items()}
         if self.as_chars:
-            self.train_X, self.train_y, self.lens_train = self.children[test_size:], self.parents[test_size:], self.sentence_lens[test_size:]
-            self.test_X, self.test_y, self.lens_test = self.children[:test_size], self.parents[:test_size], self.sentence_lens[:test_size]
+            self.train_X, self.train_y, self.lens_train = self.examples[test_size:], self.y[test_size:], self.sentence_lens[test_size:]
+            self.test_X, self.test_y, self.lens_test = self.examples[:test_size], self.y[:test_size], self.sentence_lens[:test_size]
         else:
             self.train_X, self.train_y, self.lens_train = X[test_size:], y[test_size:], self.sentence_lens[test_size:]
             self.test_X, self.test_y, self.lens_test = X[:test_size], y[:test_size], self.sentence_lens[:test_size]
@@ -171,21 +171,19 @@ class Dataset:
 
     def embed(self, v1, v2, is_edge):
         result1 = []
-        result2 = []
         for v in v1:
             if v not in self.chars2ints:
                 # 0, 1 reserved for separator and UNK
                 self.chars2ints[v] = len(self.chars2ints)
             result1.append(self.chars2ints[v])
-        # result1.append(0)
-        if is_edge:
-            for v in v2:
-                if v not in self.chars2ints:
-                    # 0, 1 reserved for separator and UNK
-                    self.chars2ints[v] = len(self.chars2ints)
-                result2.append(self.chars2ints[v])
-        result2.append(self.chars2ints['#'])
-        return result1, result2
+        result1.append(self.chars2ints['&'])
+        for v in v2:
+            if v not in self.chars2ints:
+                # 0, 1 reserved for separator and UNK
+                self.chars2ints[v] = len(self.chars2ints)
+            result1.append(self.chars2ints[v])
+        result1.append(self.chars2ints['#'])
+        return result1
 
     def transform2onehot(self, data, new_dim):
         data_shape = data.shape

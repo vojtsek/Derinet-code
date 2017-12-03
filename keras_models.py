@@ -20,18 +20,18 @@ class FeedForward:
                 model.add(Dense(output_dim=layer_size, activation=activation))
         model.add(Dense(2, activation='softmax'))
         model.compile(loss='categorical_crossentropy',
-                      optimizer='adam',metrics=['accuracy'])
+                      optimizer='rmsprop',metrics=['accuracy'])
         self.model = model
         self.layer_count = len(layer_sizes)
         self.activation = activation
 
     def _process_data(self, X, y):
-        y = np_utils.to_categorical(y, nb_classes=2)
+        y = np_utils.to_categorical(y, num_classes=2)
         return X, y
 
     def train(self, X, y, epochs=20, batch_size=128):
         X, y = self._process_data(X, y)
-        self.model.fit(X, y, batch_size=batch_size, nb_epoch=epochs, verbose=1)
+        return self.model.fit(X, y, batch_size=batch_size, epochs=epochs, verbose=1)
 
     def evaluate(self, X, y):
         X, y = self._process_data(X, y)
@@ -180,8 +180,9 @@ class Seq2Classify:
         #     empty_line[0, 2] = 1
         #     shifted_example = np.concatenate((empty_line, example[:-1]))
         #     y_shifted[i, :, :] = shifted_example
-        self.model.fit([X], y, batch_size=batch_size, epochs=epochs, verbose=1, validation_split=.2)
+        self.model.fit([X], np_utils.to_categorical(y, num_classes=2), batch_size=batch_size, epochs=epochs, verbose=1, validation_split=.2)
 
-
-    def predict(self, X, chars2ints, ints2chars):
-        self.model.predict(X)
+    def predict(self, X):
+        predicted = self.model.predict(X)
+        predicted = np.argmax(predicted, axis=1)
+        return predicted
