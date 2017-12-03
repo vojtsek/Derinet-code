@@ -1,8 +1,9 @@
 from __future__ import division
 from __future__ import print_function
 
-from keras_models import FeedForward
+from keras_models import FeedForward, Seq2Seq, Seq2Classify
 from utils import evaluate
+import pickle
 
 if __name__ == '__main__':
 
@@ -22,7 +23,7 @@ if __name__ == '__main__':
 
     # Construct the network
     from dataset import Dataset
-    dataset = Dataset(fn='data/derismall.tsv')
+    dataset = Dataset(fn='data/derismall.tsv', as_chars=True)
     test_X, test_y, _ = dataset.get_test()
     train_X, train_y, _ = dataset.get_train()
     # valid_data = dataset.get_valid()
@@ -37,11 +38,17 @@ if __name__ == '__main__':
 #           f.write(str(p))
 #    # Train
     layer_sizes = [int(ls) for ls in args.layer_sizes.split(',')]
-    model = FeedForward(layer_sizes=layer_sizes, activation=args.activation)
-    model.train(train_X, train_y)
-    evaluated = model.evaluate(test_X, test_y)
-    predicted = model.predict(test_X)
+    # model = FeedForward(layer_sizes=layer_sizes, activation=args.activation)
+    model = Seq2Classify(num_tokens=dataset.number_tokens, max_len=dataset.max_token_length)
+    model.train(train_X, train_y, epochs=1, new_dim=dataset.number_tokens, dataset=dataset)
+    # with open('model.bin', 'wb') as f:
+    #     pickle.dump(model, f)
 
-    print(evaluate(predicted, test_y))
-    print('\n AA {}\n{}'.format(predicted[:30], test_y[:30]))
+    # with open('model.bin', 'rb') as f:
+    #     model = pickle.load(f)
+    # evaluated = model.evaluate(test_X, test_y)
+    for i in range(20):
+        predicted = model.predict(test_X[i], dataset.chars2ints, dataset.int2chars)
+        print('\n{}\n'.format(predicted[:30]))
+
 
