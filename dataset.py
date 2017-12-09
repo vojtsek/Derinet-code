@@ -128,6 +128,7 @@ class Dataset:
                 examples.append(example)
                     # parents.append(parent)
             y.append(int(edge))
+        X_tmp = None
         if not as_chars:
             X_tmp = np.array(X)
         else:
@@ -176,13 +177,14 @@ class Dataset:
                 # 0, 1 reserved for separator and UNK
                 self.chars2ints[v] = len(self.chars2ints)
             result1.append(self.chars2ints[v])
-        result1.append(self.chars2ints['&'])
-        for v in v2:
-            if v not in self.chars2ints:
-                # 0, 1 reserved for separator and UNK
-                self.chars2ints[v] = len(self.chars2ints)
-            result1.append(self.chars2ints[v])
-        result1.append(self.chars2ints['#'])
+        if v2 is not None:
+            result1.append(self.chars2ints['&'])
+            for v in v2:
+                if v not in self.chars2ints:
+                    # 0, 1 reserved for separator and UNK
+                    self.chars2ints[v] = len(self.chars2ints)
+                result1.append(self.chars2ints[v])
+            result1.append(self.chars2ints['#'])
         return result1
 
     def transform2onehot(self, data, new_dim):

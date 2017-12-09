@@ -14,7 +14,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default=128, type=int, help='Batch size.')
     parser.add_argument('--layer_sizes', default='50,15', type=str, help='Sizes of respective layers; comma separated')
     parser.add_argument('--activation', default='relu')
-    parser.add_argument('--epochs', default=50, type=int, help='Number of epochs.')
+    parser.add_argument('--epochs', default=5, type=int, help='Number of epochs.')
     parser.add_argument('--logdir', default="logs", type=str, help='Logdir name.')
     parser.add_argument('--exp', default="2-mnist-annotated-graph", type=str, help='Experiment name.')
     parser.add_argument('--threads', default=1, type=int, help='Maximum number of threads to use.')
@@ -24,7 +24,7 @@ if __name__ == '__main__':
 
     # Construct the network
     from dataset import Dataset
-    dataset = Dataset(fn='data/derismall.tsv', as_chars=False)
+    dataset = Dataset(fn='data/derismall.tsv', as_chars=True)
     test_X, test_y, _ = dataset.get_test()
     train_X, train_y, _ = dataset.get_train()
     # valid_data = dataset.get_valid()
@@ -39,8 +39,8 @@ if __name__ == '__main__':
 #           f.write(str(p))
 #    # Train
     layer_sizes = [int(ls) for ls in args.layer_sizes.split(',')]
-    model = FeedForward(layer_sizes=layer_sizes, activation=args.activation)
-    # model = Seq2Classify(latent_dim=5, num_tokens=dataset.number_tokens, max_len=dataset.max_token_length)
+    # model = FeedForward(layer_sizes=layer_sizes, activation=args.activation)
+    model = Seq2Classify(latent_dim=5, num_tokens=dataset.number_tokens, max_len=dataset.max_token_length)
     hist = model.train(train_X, train_y, epochs=args.epochs)
     # with open('model.bin', 'wb') as f:
     #     pickle.dump(model, f)

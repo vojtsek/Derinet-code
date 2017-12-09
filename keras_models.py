@@ -31,7 +31,8 @@ class FeedForward:
 
     def train(self, X, y, epochs=20, batch_size=128):
         X, y = self._process_data(X, y)
-        return self.model.fit(X, y, batch_size=batch_size, epochs=epochs, verbose=1)
+        return \
+            self.model.fit(X, y, batch_size=batch_size, epochs=epochs, verbose=1)
 
     def evaluate(self, X, y):
         X, y = self._process_data(X, y)
