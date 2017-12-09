@@ -124,7 +124,7 @@ class Dataset:
                 max_token_length = max(max_token_length, token_length)
                 self.sentence_lens.append(token_length)
                 # if edge:
-                example = self.embed(first[1], second[1], edge)
+                example = self.embed(first[1], None, edge)
                 examples.append(example)
                     # parents.append(parent)
             y.append(int(edge))

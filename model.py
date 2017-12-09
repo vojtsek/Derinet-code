@@ -24,7 +24,7 @@ if __name__ == '__main__':
 
     # Construct the network
     from dataset import Dataset
-    dataset = Dataset(fn='data/derismall.tsv', as_chars=True)
+    dataset = Dataset(fn='data/derismall.tsv', as_chars=False)
     test_X, test_y, _ = dataset.get_test()
     train_X, train_y, _ = dataset.get_train()
     # valid_data = dataset.get_valid()
@@ -39,8 +39,8 @@ if __name__ == '__main__':
 #           f.write(str(p))
 #    # Train
     layer_sizes = [int(ls) for ls in args.layer_sizes.split(',')]
-    # model = FeedForward(layer_sizes=layer_sizes, activation=args.activation)
-    model = Seq2Classify(latent_dim=5, num_tokens=dataset.number_tokens, max_len=dataset.max_token_length)
+    model = FeedForward(layer_sizes=layer_sizes, activation=args.activation)
+    # model = Seq2Classify(latent_dim=5, num_tokens=dataset.number_tokens, max_len=dataset.max_token_length)
     hist = model.train(train_X, train_y, epochs=args.epochs)
     # with open('model.bin', 'wb') as f:
     #     pickle.dump(model, f)
