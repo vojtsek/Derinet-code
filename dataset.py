@@ -99,7 +99,7 @@ class Dataset:
         parents = []
         max_token_length = 0
         self.chars2ints['UNK'] = 0
-        self.chars2ints['@'] = 1
+        self.chars2ints['EOS'] = 1
         self.chars2ints['&'] = len(self.chars2ints)
         self.chars2ints['#'] = len(self.chars2ints)
         for datapoint in pairs:
@@ -123,10 +123,12 @@ class Dataset:
                 token_length = len(first[1]) + len(second[1]) + 2
                 max_token_length = max(max_token_length, token_length)
                 self.sentence_lens.append(token_length)
-                # if edge:
-                example = self.embed(first[1], second[1], edge)
-                examples.append(example)
-                    # parents.append(parent)
+                if edge:
+                    example = self.embed(second[1], '', edge)
+                    parent = self.embed(first[1], '', edge)
+                    # print('Example {}\t Paren?t {}'.format(first[1], second[1]))
+                    examples.append(example)
+                    parents.append(parent)
             y.append(int(edge))
         if not as_chars:
             X_tmp = np.array(X)
@@ -148,7 +150,7 @@ class Dataset:
 
 
         self.y = np.array(y)
-        X = X_tmp
+        # X = X_tmp
         self.dataset = (X, y)
         # with open('dataset-subset.dump', 'wb') as f:
         #     pickle.dump(dataset, f)
@@ -161,8 +163,8 @@ class Dataset:
         self.number_tokens = len(self.chars2ints)
         self.int2chars = { y:x for x, y in self.chars2ints.items()}
         if self.as_chars:
-            self.train_X, self.train_y, self.lens_train = self.examples[test_size:], self.y[test_size:], self.sentence_lens[test_size:]
-            self.test_X, self.test_y, self.lens_test = self.examples[:test_size], self.y[:test_size], self.sentence_lens[:test_size]
+            self.train_X, self.train_y, self.lens_train = self.examples[test_size:], self.parents[test_size:], self.sentence_lens[test_size:]
+            self.test_X, self.test_y, self.lens_test = self.examples[:test_size], self.parents[:test_size], self.sentence_lens[:test_size]
         else:
             self.train_X, self.train_y, self.lens_train = X[test_size:], y[test_size:], self.sentence_lens[test_size:]
             self.test_X, self.test_y, self.lens_test = X[:test_size], y[:test_size], self.sentence_lens[:test_size]
@@ -176,13 +178,13 @@ class Dataset:
                 # 0, 1 reserved for separator and UNK
                 self.chars2ints[v] = len(self.chars2ints)
             result1.append(self.chars2ints[v])
-        result1.append(self.chars2ints['&'])
-        for v in v2:
-            if v not in self.chars2ints:
-                # 0, 1 reserved for separator and UNK
-                self.chars2ints[v] = len(self.chars2ints)
-            result1.append(self.chars2ints[v])
-        result1.append(self.chars2ints['#'])
+        # result1.append(self.chars2ints['&'])
+        # for v in v2:
+        #     if v not in self.chars2ints:
+        #         # 0, 1 reserved for separator and UNK
+        #         self.chars2ints[v] = len(self.chars2ints)
+        #     result1.append(self.chars2ints[v])
+        # result1.append(self.chars2ints['#'])
         return result1
 
     def transform2onehot(self, data, new_dim):
@@ -204,10 +206,14 @@ class Dataset:
     def get_train(self):
         return self.train_X, self.train_y, self.lens_train
 
+    @property
+    def vocab_size(self):
+        return len(self.chars2ints)
+
     def next_batch(self, bs=10):
-        batch = self.train_X[self.perm[self.current_idx:(self.current_idx + bs)], :],\
-                self.train_y[self.perm[self.current_idx:(self.current_idx + bs)]],\
-                self.lens_train[self.perm[self.current_idx:(self.current_idx + bs)]]
+        batch = (self.train_X[self.perm[self.current_idx:(self.current_idx + bs)], :],
+                self.train_y[self.perm[self.current_idx:(self.current_idx + bs)]])
+                # self.lens_train[self.perm[self.current_idx:(self.current_idx + bs)]]
         self.current_idx += bs
         return batch
 

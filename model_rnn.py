@@ -6,6 +6,7 @@ from __future__ import print_function
 import datetime
 import numpy as np
 import sys
+import os
 import tensorflow as tf
 import tensorflow.contrib.layers as tf_layers
 import tensorflow.contrib.metrics as tf_metrics
@@ -13,9 +14,9 @@ from tensorflow.python.ops.control_flow_ops import cond
 import pickle
 
 
-class Network:
-    def __init__(self, rnn_cell, rnn_cell_dim, method, words, logdir, expname, threads=1, seed=42, character_count=50, embedding_matrix=None,
-                 max_sentence_length=None, embedding_dim=100, distinct_tags=2):
+class Seq2Seq:
+    def __init__(self, rnn_cell, rnn_cell_dim, method, vocab_size, logdir, expname, threads=1, seed=42, character_count=50, embedding_matrix=None,
+                 max_sentence_length=None, embedding_dim=50, distinct_tags=2):
         # Create an empty graph and a session
         graph = tf.Graph()
         graph.seed = seed
@@ -35,98 +36,80 @@ class Network:
 
             self.embedding_matrix = embedding_matrix
             self.global_step = tf.Variable(0, dtype=tf.int64, trainable=False, name="global_step")
-            self.sentence_lens = tf.placeholder(tf.int32, [None])
-            self.forms = tf.placeholder(tf.int32, [None, None])
+            # self.sentence_lens = tf.placeholder(tf.int32, [None])
+            self.encoder_inputs = tf.placeholder(tf.int32, [None, None], name='encoder_inputs')
+            self.decoder_targets = tf.placeholder(tf.int32, [None, None], name='decoder_targets')
+            self.decoder_inputs = tf.placeholder(tf.int32, [None, None], name='decoder_inputs')
+
             self.tags = tf.placeholder(tf.int64, [None])
             self.char_ids = tf.placeholder(tf.int32, [None, None])
             self.charseq_lens = tf.placeholder(tf.int32, [None])
             self.charseqs = tf.placeholder(tf.int32, [None, max_sentence_length])
             self.is_first = tf.placeholder(tf.bool)
 
-            self.embedding_placeholder = tf.placeholder_with_default(tf.random_normal([words, embedding_dim]), [words, embedding_dim])
+            self.embedding_placeholder = tf.placeholder_with_default(tf.random_normal([vocab_size, embedding_dim]), [vocab_size, embedding_dim])
             alpha = .3
+            embeddings = tf.Variable(initial_value=tf.random_normal([vocab_size, embedding_dim]), dtype=tf.float32)
+            encoder_inputs_emb = tf.nn.embedding_lookup(embeddings, ids=self.encoder_inputs)
+            decoder_inputs_emb = tf.nn.embedding_lookup(embeddings, ids=self.encoder_inputs)
 
-            if method == "learned_we":
-                embeddings = tf.Variable(initial_value=tf.random_normal([words, embedding_dim]), dtype=tf.float32)
-                encoded_inputs = tf.nn.embedding_lookup(embeddings, ids=self.forms)
+            with tf.variable_scope("Encoder"):
+            #     (outputs, states) = tf.nn.bidirectional_dynamic_rnn(rnn_cell, rnn_cell, encoder_inputs_emb,
+            #                                                     sequence_length=self.sentence_lens, time_major=False,
+            #                                                     dtype=tf.float32)
+            # self.logits = tf_layers.linear(tf.concat(states, 1), distinct_tags)
 
-            elif method == "updated_pretrained_we":
-                emb_W = tf.Variable(tf.constant(0.0, shape=[words, embedding_dim]),
-                                trainable=True, name="W")
+                encoder_cell = tf.contrib.rnn.LSTMCell(rnn_cell_dim)
 
-                embeddings = cond(self.is_first, lambda: emb_W.assign(self.embedding_matrix), lambda: emb_W)
-                encoded_inputs = tf.nn.embedding_lookup(embeddings, ids=self.forms)
+                encoder_outputs, encoder_final_state = tf.nn.dynamic_rnn(
+                    encoder_cell, encoder_inputs_emb,
+                    dtype=tf.float32, time_major=False,
+                )
 
-            elif method == "only_pretrained_we":
-                emb_W = tf.Variable(tf.constant(0.0, shape=[words, embedding_dim]),
-                                trainable=False, name="W")
-                embeddings = cond(self.is_first, lambda: emb_W.assign(self.embedding_matrix), lambda: emb_W)
-                encoded_inputs = tf.nn.embedding_lookup(embeddings, ids=self.forms)
+                del encoder_outputs
 
-            elif method == "char_rnn":
+            with tf.variable_scope("Decoder"):
+                decoder_cell = tf.contrib.rnn.LSTMCell(rnn_cell_dim)
 
-                embeddings = self.compute_embedding_rnn(self.charseqs, self.charseq_lens, character_count)
-                encoded_inputs = tf.nn.embedding_lookup(embeddings, self.char_ids)
+                decoder_outputs, decoder_final_state = tf.nn.dynamic_rnn(
+                    decoder_cell, decoder_inputs_emb,
+                    initial_state=encoder_final_state,
+                    dtype=tf.float32, time_major=False, scope="plain_decoder",
+                )
 
-            elif method == "char_conv":
-                embeddings = self.compute_embedding_conv(self.charseqs, character_count)
-                encoded_inputs = tf.nn.embedding_lookup(embeddings, self.char_ids)
+            decoder_logits = tf.contrib.layers.linear(decoder_outputs, vocab_size)
 
-            with tf.variable_scope("RNN"):
-                (outputs, states) = tf.nn.bidirectional_dynamic_rnn(rnn_cell, rnn_cell, encoded_inputs,
-                                                                sequence_length=self.sentence_lens, time_major=False,
-                                                                dtype=tf.float32)
-            self.logits = tf_layers.linear(tf.concat(states, 1), distinct_tags)
-            # self.logits = tf.Print(self.logits, [self.logits], message="This is a: ")
+            self.decoder_predictions = tf.argmax(decoder_logits, 2)
 
-            self.labels = tf.one_hot(self.tags, distinct_tags, dtype=tf.int64)
+            stepwise_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
+                labels=tf.one_hot(self.decoder_targets, depth=vocab_size, dtype=tf.float32),
+                logits=decoder_logits,
+            )
 
-            mask = tf.sequence_mask(self.sentence_lens, tf.reduce_max(self.sentence_lens))
-            logits = alpha * outputs[0] + (1 - alpha) * outputs[1]
-            self.loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits, labels=self.tags)
+
+            # mask = tf.sequence_mask(self.sentence_lens, tf.reduce_max(self.sentence_lens))
+            # logits = alpha * outputs[0] + (1 - alpha) * outputs[1]
+            self.loss = tf.reduce_mean(stepwise_cross_entropy)
             self.optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
             self.training = self.optimizer.minimize(self.loss)
-            self.predictions = tf.argmax(self.logits, 1)
-            self.accuracy = tf_metrics.accuracy(self.predictions, tf.argmax(self.labels, 1))
+            # self.predictions = tf.argmax(self.logits, 1)
 
             self.dataset_name = tf.placeholder(tf.string, [])
 
             # Initialize variables
             self.session.run(tf.initialize_all_variables())
 
-    def compute_embedding_rnn(self, charseqs, charseq_lens, char_count):
-        charseqs_oh = tf.one_hot(charseqs, char_count)
-        with tf.variable_scope("EmbeddingRNN"):
-            cell = tf.nn.rnn_cell.GRUCell(100)
-            (output1, output2), (states1, states2) = tf.nn.bidirectional_dynamic_rnn(cell, cell, charseqs_oh,
-                                                                sequence_length=charseq_lens, time_major=False,
-                                                                dtype=tf.float32)
-        beta = 0.5
-        return beta * states1 + (1 - beta) * states2
-
-    def compute_embedding_conv(self, charseqs, char_count):
-
-        charseqs_oh = tf.expand_dims(tf.one_hot(charseqs, char_count), 1)
-
-
-        first_layer = tf_layers.convolution2d(charseqs_oh, 25, 2)
-        first = tf.argmax(tf.argmax(first_layer, 2), 1)
-        second_layer = tf_layers.convolution2d(charseqs_oh, 25, 3)
-        second = tf.argmax(tf.argmax(second_layer, 2), 1)
-        third_layer = tf_layers.convolution2d(charseqs_oh, 25, 4)
-        third = tf.argmax(tf.argmax(third_layer, 2), 1)
-        fourth_layer = tf_layers.convolution2d(charseqs_oh, 25, 5)
-        fourth = tf.argmax(tf.argmax(fourth_layer, 2), 1)
-        return tf.to_float(tf.concat(1, [first, second, third, fourth]))
-
     @property
     def training_step(self):
         return self.session.run(self.global_step)
 
-    def train(self, sentence_lens, forms, tags,first = False):
-        feed_dict = {self.sentence_lens: sentence_lens, self.forms: forms,
-                                       self.tags: tags, self.dataset_name: "train", self.is_first: first}
-        _  = self.session.run([self.training], feed_dict)
+    def train(self, encoder_in, decoder_in, decoder_targets, first=False):
+        feed_dict = {self.encoder_inputs: encoder_in,
+                     self.decoder_inputs: decoder_in,
+                     self.decoder_targets: decoder_targets,
+                     self.dataset_name: "train", self.is_first: first}
+        _, loss  = self.session.run([self.training, self.loss], feed_dict)
+        return loss
 
     def train_with_chars(self, sentence_lens, charseqs_ids, tags, charseqs, charseq_lens):
 
@@ -155,10 +138,14 @@ class Network:
         accuracy = self.session.run([self.accuracy], feed_dict)
         return accuracy
 
-    def predict(self, sentence_lens, forms):
-        feed_dict = {self.sentence_lens: sentence_lens, self.forms: forms, self.is_first: False}
-        return self.session.run(self.predictions, feed_dict)
+    def predict(self, inputs):
 
+        feed_dict = {self.encoder_inputs: inputs, self.decoder_inputs: np.ones((1, inputs.shape[1])), self.is_first: False}
+        return self.session.run(self.decoder_predictions, feed_dict)
+
+    def save(self, model_name='models/model_final'):
+        saver = tf.train.Saver()
+        saver.save(self.session, model_name)
 
 def tr_embeddings(word_dataset, embedding_map, word_ids, offset):
     new_word_ids = np.ones(word_ids.shape, dtype=np.int32)
@@ -231,8 +218,8 @@ if __name__ == "__main__":
     dataset = Dataset(fn='data/derismall.tsv', as_chars=True)
     test_data = dataset.get_test()
     train_data = dataset.get_train()
-    network = Network(rnn_cell="GRU", rnn_cell_dim=20, logdir=args.logdir, method="learned_we",
-                      expname=args.exp, threads=args.threads, words=len(dataset.chars2ints) + 2)
+    network = Seq2Seq(rnn_cell="GRU", rnn_cell_dim=20, logdir=args.logdir, method="learned_we",
+                      expname=args.exp, threads=args.threads, vocab_size=len(dataset.chars2ints) + 2)
     with open("test.reference", 'wb') as f:
         pickle.dump(test_data[1], f)
     # Train
