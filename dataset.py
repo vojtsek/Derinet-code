@@ -69,7 +69,7 @@ class Dataset:
         data = np.asarray(data)
         pairs = []
         for n, line in enumerate(data):
-            for i in range(-10, 11):
+            for i in range(-2, 2):
                 if i == 0:
                     continue
                 idx = n + i
@@ -104,6 +104,9 @@ class Dataset:
         self.chars2ints['#'] = len(self.chars2ints)
         for datapoint in pairs:
             first, second, edge = datapoint
+            import random
+            if not edge and random.random() < 0.8:
+                continue
             if not as_chars:
                 fv = np.zeros((SUFFIX_COUNT + 1 + 6))
                 common_prefix, (suff1, suff2) = get_halves(first[1], second[1])
@@ -123,12 +126,12 @@ class Dataset:
                 token_length = len(first[1]) + len(second[1]) + 2
                 max_token_length = max(max_token_length, token_length)
                 self.sentence_lens.append(token_length)
-                if edge:
-                    example = self.embed(second[1], '', edge)
-                    parent = self.embed(first[1], '', edge)
+                # if edge:
+                example = self.embed(second[1], '', edge)
+                parent = self.embed(first[1], '', edge)
                     # print('Example {}\t Paren?t {}'.format(first[1], second[1]))
-                    examples.append(example)
-                    parents.append(parent)
+                examples.append(example)
+                parents.append(parent)
             y.append(int(edge))
         if not as_chars:
             X_tmp = np.array(X)
@@ -163,8 +166,8 @@ class Dataset:
         self.number_tokens = len(self.chars2ints)
         self.int2chars = { y:x for x, y in self.chars2ints.items()}
         if self.as_chars:
-            self.train_X, self.train_y, self.lens_train = self.examples[test_size:], self.parents[test_size:], self.sentence_lens[test_size:]
-            self.test_X, self.test_y, self.lens_test = self.examples[:test_size], self.parents[:test_size], self.sentence_lens[:test_size]
+            self.train_X, self.train_y, self.lens_train = self.examples[test_size:], self.y[test_size:], self.sentence_lens[test_size:]
+            self.test_X, self.test_y, self.lens_test = self.examples[:test_size], self.y[:test_size], self.sentence_lens[:test_size]
         else:
             self.train_X, self.train_y, self.lens_train = X[test_size:], y[test_size:], self.sentence_lens[test_size:]
             self.test_X, self.test_y, self.lens_test = X[:test_size], y[:test_size], self.sentence_lens[:test_size]

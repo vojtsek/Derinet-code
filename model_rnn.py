@@ -38,8 +38,7 @@ class Seq2Seq:
             self.global_step = tf.Variable(0, dtype=tf.int64, trainable=False, name="global_step")
             # self.sentence_lens = tf.placeholder(tf.int32, [None])
             self.encoder_inputs = tf.placeholder(tf.int32, [None, None], name='encoder_inputs')
-            self.decoder_targets = tf.placeholder(tf.int32, [None, None], name='decoder_targets')
-            self.decoder_inputs = tf.placeholder(tf.int32, [None, None], name='decoder_inputs')
+            self.targets = tf.placeholder(tf.int64, [None], name='targets')
 
             self.tags = tf.placeholder(tf.int64, [None])
             self.char_ids = tf.placeholder(tf.int32, [None, None])
@@ -49,41 +48,26 @@ class Seq2Seq:
 
             self.embedding_placeholder = tf.placeholder_with_default(tf.random_normal([vocab_size, embedding_dim]), [vocab_size, embedding_dim])
             alpha = .3
+            print(max_sentence_length)
             embeddings = tf.Variable(initial_value=tf.random_normal([vocab_size, embedding_dim]), dtype=tf.float32)
             encoder_inputs_emb = tf.nn.embedding_lookup(embeddings, ids=self.encoder_inputs)
-            decoder_inputs_emb = tf.nn.embedding_lookup(embeddings, ids=self.encoder_inputs)
+            shape = tf.convert_to_tensor([-1, max_sentence_length, 50, 1])
+            encoder_inputs_emb = tf.reshape(encoder_inputs_emb, shape=shape)
 
-            with tf.variable_scope("Encoder"):
-            #     (outputs, states) = tf.nn.bidirectional_dynamic_rnn(rnn_cell, rnn_cell, encoder_inputs_emb,
-            #                                                     sequence_length=self.sentence_lens, time_major=False,
-            #                                                     dtype=tf.float32)
-            # self.logits = tf_layers.linear(tf.concat(states, 1), distinct_tags)
+            conv1 = tf_layers.conv2d(encoder_inputs_emb, num_outputs=8, kernel_size=[5, 5])
+            pool1 = tf.layers.max_pooling2d(inputs=conv1, pool_size=[3, 3], strides=3)
 
-                encoder_cell = tf.contrib.rnn.LSTMCell(rnn_cell_dim)
-
-                encoder_outputs, encoder_final_state = tf.nn.dynamic_rnn(
-                    encoder_cell, encoder_inputs_emb,
-                    dtype=tf.float32, time_major=False,
-                )
-
-                del encoder_outputs
-
-            with tf.variable_scope("Decoder"):
-                decoder_cell = tf.contrib.rnn.LSTMCell(rnn_cell_dim)
-
-                decoder_outputs, decoder_final_state = tf.nn.dynamic_rnn(
-                    decoder_cell, decoder_inputs_emb,
-                    initial_state=encoder_final_state,
-                    dtype=tf.float32, time_major=False, scope="plain_decoder",
-                )
-
-            decoder_logits = tf.contrib.layers.linear(decoder_outputs, vocab_size)
-
-            self.decoder_predictions = tf.argmax(decoder_logits, 2)
-
+            conv2  = tf_layers.conv2d(pool1, num_outputs=4, kernel_size=[5, 5])
+            pool2 = tf.layers.max_pooling2d(conv2, pool_size=[3, 3], strides=3)
+            pool2_flat = tf.reshape(pool2, [-1, 7 * 5 * 4])
+            dense = tf.layers.dense(inputs=pool2_flat, units=256, activation=tf.nn.relu)
+            dropout = tf.layers.dropout(inputs=dense, rate=0.4)
+            self.logits = tf.layers.dense(inputs=dropout, units=2)
+            self.labels = tf.one_hot(self.targets, depth=2, dtype=tf.int64)
+            self.smax = tf.nn.softmax(self.logits)
             stepwise_cross_entropy = tf.nn.softmax_cross_entropy_with_logits(
-                labels=tf.one_hot(self.decoder_targets, depth=vocab_size, dtype=tf.float32),
-                logits=decoder_logits,
+                labels=self.labels,
+                logits=self.smax,
             )
 
 
@@ -92,7 +76,8 @@ class Seq2Seq:
             self.loss = tf.reduce_mean(stepwise_cross_entropy)
             self.optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
             self.training = self.optimizer.minimize(self.loss)
-            # self.predictions = tf.argmax(self.logits, 1)
+            self.predictions = tf.argmax(self.logits, 1)
+            self.accuracy = tf_metrics.accuracy(self.predictions, self.targets)
 
             self.dataset_name = tf.placeholder(tf.string, [])
 
@@ -103,13 +88,12 @@ class Seq2Seq:
     def training_step(self):
         return self.session.run(self.global_step)
 
-    def train(self, encoder_in, decoder_in, decoder_targets, first=False):
+    def train(self, encoder_in, targets, first=False):
         feed_dict = {self.encoder_inputs: encoder_in,
-                     self.decoder_inputs: decoder_in,
-                     self.decoder_targets: decoder_targets,
+                     self.targets: targets,
                      self.dataset_name: "train", self.is_first: first}
-        _, loss  = self.session.run([self.training, self.loss], feed_dict)
-        return loss
+        _, loss, acc  = self.session.run([self.training, self.loss, self.accuracy], feed_dict)
+        return loss, acc
 
     def train_with_chars(self, sentence_lens, charseqs_ids, tags, charseqs, charseq_lens):
 
@@ -140,8 +124,8 @@ class Seq2Seq:
 
     def predict(self, inputs):
 
-        feed_dict = {self.encoder_inputs: inputs, self.decoder_inputs: np.ones((1, inputs.shape[1])), self.is_first: False}
-        return self.session.run(self.decoder_predictions, feed_dict)
+        feed_dict = {self.encoder_inputs: inputs, self.is_first: False}
+        return self.session.run(self.predictions, feed_dict)
 
     def save(self, model_name='models/model_final'):
         saver = tf.train.Saver()
